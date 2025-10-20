@@ -14,7 +14,7 @@ from datetime import datetime
 
 JSON_PATH = "data.json"
 EXCEL_PATH = "wordbook.xlsx"
-print_output = False
+print_output = True
 target_languages = {
     'en': 'ENGLISH',
     'fr': 'FRENCH',
@@ -80,18 +80,32 @@ def save_data(file_path=JSON_PATH, data=None):
 def export_table(file_path=JSON_PATH, pos_list=target_POS.values()):
     data = load_data(file_path)  # get the saved data from JSON
     data_list = [v | {"index": k} for k, v in data.items()]
-    df_obj = {}
     with pd.ExcelWriter(EXCEL_PATH, engine='xlsxwriter') as writer:
         df = pd.json_normalize(data_list, sep="_")
         for col in df.columns:
             df[col] = df[col].apply(lambda x: ", ".join(
                 x) if isinstance(x, list) else x)
+        df = df[[
+            "index",
+            "new_words_en",
+            "new_words_fr",
+            "new_words_ja",
+            "new_words_pt",
+            "sent_translations_en",
+            "sent_translations_fr",
+            "sent_translations_ja",
+            "sent_translations_pt",
+            "source_sentence_en",
+            "source_sentence_fr",
+            "source_sentence_ja",
+            "source_sentence_pt",
+            "created_at",
+            "notes"
+        ]]
         df.to_excel(writer, index=False)
-        # df = df[]
         if print_output:
             print(
                 f"{"="*150}\n{df}\n{"="*150}")
-    return df_obj
 
 
 def get_word_list(doc, lang, data) -> list:
@@ -153,6 +167,7 @@ def process_text(input_text, target_langs=target_languages.keys()):
                 new_entry["new_words"][lang] = get_word_list(
                     doc, lang, data)
                 new_entry["sent_translations"][lang] = translated_text
+                new_entry["source_sentence"][lang] = ""
         new_entry["created_at"] = datetime.now(
         ).isoformat(timespec='seconds')
         data[id] = new_entry
