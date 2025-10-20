@@ -9,6 +9,7 @@ import json
 import os
 import pandas as pd
 import copy
+import re
 from googletrans import Translator
 from datetime import datetime
 
@@ -60,7 +61,20 @@ translator = Translator()  # Create an instance of the Translator
 # input_string = "This is the first sentence. Here is another one!"
 # input_string = "This is the first movie. There will be another one!"
 # input_string = "Ela está cansada e quer dormir."
-input_string = "Com esses 10 jogos ideais para festas, você tem em mãos uma “caixa de ferramentas” perfeita para animar qualquer encontro de amigos, desde aquela entrada mais leve até o auge da festa. Há opções para levantar todo mundo, para trocas rápidas, para competir e para rir juntos!"
+# input_string = "Com esses 10 jogos ideais para festas, você tem em mãos uma “caixa de ferramentas” perfeita para animar qualquer encontro de amigos, desde aquela entrada mais leve até o auge da festa. Há opções para levantar todo mundo, para trocas rápidas, para competir e para rir juntos!"
+input_string = """Dans moins d'une heure, Donald Trump reçoit Volodymyr Zelensky dans son bureau de la Maison Blanche,à Washington. Les missiles Tomahawk,l'utilisationde cette arme de longue portée sera au centre des discussions entre le président américain et le président ukrainien.
+
+Dans cette édition,aussi, une nouvelle page de l'histoire de Madagascar s'est ouverte après la fuite à l'étranger d'Andry Rajoelina.Lecolonel Randrianirinaestle nouveau président malgache.
+
+Nous sommes,aussi,au Proche-Orient,pour parler d'un sujet sensible. Après l'accord entre Israël et le Hamas, comment rendre le reste des corps sans vie ?Ce qu'on appelle une dépouille. Nous serons à Ramallah."""
+input_string = """Every week it seems US financial markets are hit by another bout of fear.
+The latest worries spread this week from the banking sector in the US, after two regional lenders warned they would be hit by losses from alleged fraud.
+But before that, markets swooned over signs of rekindled US-China tensions, as the two superpowers face off over tariffs, advanced technology and access to rare earths.
+The bankruptcies of car parts supplier First Brands and subprime car lender Tricolor acted as a trigger for nervous chatter in September.
+Over the last month, US shares, which had been climbing since their tariff-induced rout in April, have flattened.
+But in many ways the market swings so far - down roughly 3% at the steepest - are not unusual.
+Zooming out, the major indexes have still posted gains since the start of the year, with the S&P 500 up roughly 13%. That's smaller than 2024 but still solid.
+"The market has done surprisingly well so far this year ... driven by an improvement in corporate profits and the enthusiasm surrounding AI," says Sam Stovall, chief investment strategist at CFRA Research."""
 
 
 def load_data(file_path=JSON_PATH):
@@ -108,6 +122,15 @@ def export_table(file_path=JSON_PATH, pos_list=target_POS.values()):
                 f"{"="*150}\n{df}\n{"="*150}")
 
 
+def search_same_word(word, lemma, pos_name):
+    m = re.search(r"\(([^:()]+):\s*([^()]+)\)", word)
+    if m:
+        l, p = m.group(1).strip(), m.group(2).strip()
+        if l == lemma and p == pos_name:
+            return True
+    return False
+
+
 def get_word_list(doc, lang, data) -> list:
     new_words = []
     for token in doc:
@@ -116,7 +139,7 @@ def get_word_list(doc, lang, data) -> list:
             pos_name = target_POS[token.pos_]
             # Check duplication: add word if there are any duplicates
             if not any([True for id in data for word in data[id]
-                        ["new_words"][lang] if lemma in word and pos_name in word]):
+                        ["new_words"][lang] if search_same_word(word, lemma, pos_name)]):
                 new_words.append(f"{token.text} ({lemma}: {pos_name})")
     return new_words
 
@@ -132,6 +155,7 @@ def get_word_list(doc, lang, data) -> list:
 
 
 def process_text(input_text, target_langs=target_languages.keys()):
+    input_text = input_text.replace("\n", " ")
     print(f"{"="*150}\n⏳ Processing your input text!")
     # detect the used language
     detected_lang = translator.detect(input_text).lang
@@ -148,7 +172,8 @@ def process_text(input_text, target_langs=target_languages.keys()):
     print("⏳ Generating translations and new word lists")
     doc_dl = nlp_dl(input_text)
     for id, sent in enumerate(doc_dl.sents, id_start):
-        if any([True for v in data.values() if v["source_sentence"][detected_lang] == sent.text]):
+        # if the entire sentence in the data, skip the registration
+        if any([True for v in data.values() if sent.text in v["source_sentence"][detected_lang]]):
             print(f"🟡 '{sent}' already exists. Registration skipped.")
             continue
         print(f"🟢 Registering '{sent.text}'")
