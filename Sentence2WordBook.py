@@ -1,0 +1,171 @@
+"""
+Author: srjoy5000
+Using googletrans==3.1.0a0 instead of 4.0.0-rc1 to avoid errors
+"""
+
+
+import spacy
+import json
+import os
+import pandas as pd
+import copy
+from googletrans import Translator
+from datetime import datetime
+
+JSON_PATH = "data.json"
+EXCEL_PATH = "wordbook.xlsx"
+print_output = False
+target_languages = {
+    'en': 'ENGLISH',
+    'fr': 'FRENCH',
+    'pt': 'PORTUGUESE',
+    'ja': 'JAPANESE',
+}
+target_POS = {
+    "NOUN": "nouns",
+    "VERB": "verbs",
+    "ADJ": "adjectives",
+    "ADV": "adverbs",
+    # "AUX": "auxiliary" # not recommended
+}
+
+# MODELS = {
+#     'en': 'en_core_web_sm',
+#     'fr': 'fr_core_news_sm',
+#     'pt': 'pt_core_news_sm',
+#     'ja': 'ja_core_news_sm',
+# }
+MODELS = {
+    'en': 'en_core_web_md',
+    'fr': 'fr_core_news_md',
+    'pt': 'pt_core_news_md',
+    'ja': 'ja_core_news_md',
+}
+
+data_structure = {
+    "new_words": {},
+    "sent_translations": {},
+    "source_sentence": {},
+    "created_at": "",
+    "notes": ""
+}
+
+
+translator = Translator()  # Create an instance of the Translator
+
+# input_string = "Bonjour, comment ça va?"
+# input_string = "J’ai vu un chien courir dans le parc."
+# input_string = "Sucessor espiritual de Ghost of Tsushima está com grande desconto ao usar Cupom exclusivo"
+# input_string = "Os preços e ofertas mencionados são válidos no momento da publicação e podem mudar sem aviso prévio."
+# input_string = "This is the first sentence. Here is another one!"
+# input_string = "This is the first movie. There will be another one!"
+# input_string = "Ela está cansada e quer dormir."
+input_string = "Com esses 10 jogos ideais para festas, você tem em mãos uma “caixa de ferramentas” perfeita para animar qualquer encontro de amigos, desde aquela entrada mais leve até o auge da festa. Há opções para levantar todo mundo, para trocas rápidas, para competir e para rir juntos!"
+
+
+def load_data(file_path=JSON_PATH):
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    else:
+        return {}
+
+
+def save_data(file_path=JSON_PATH, data=None):
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+# take the JSON and export it to an Excel file
+def export_table(file_path=JSON_PATH, pos_list=target_POS.values()):
+    data = load_data(file_path)  # get the saved data from JSON
+    data_list = [v | {"index": k} for k, v in data.items()]
+    df_obj = {}
+    with pd.ExcelWriter(EXCEL_PATH, engine='xlsxwriter') as writer:
+        df = pd.json_normalize(data_list, sep="_")
+        for col in df.columns:
+            df[col] = df[col].apply(lambda x: ", ".join(
+                x) if isinstance(x, list) else x)
+        df.to_excel(writer, index=False)
+        # df = df[]
+        if print_output:
+            print(
+                f"{"="*150}\n{df}\n{"="*150}")
+    return df_obj
+
+
+def get_word_list(doc, lang, data) -> list:
+    new_words = []
+    for token in doc:
+        if token.pos_ in target_POS.keys():  # choose only noun, verb, adj, adv
+            lemma = token.lemma_.lower()
+            pos_name = target_POS[token.pos_]
+            # Check duplication: add word if there are any duplicates
+            if not any([True for id in data for word in data[id]
+                        ["new_words"][lang] if lemma in word and pos_name in word]):
+                new_words.append(f"{token.text} ({lemma}: {pos_name})")
+    return new_words
+
+
+"""
+まず、detected_langでモデル読み込み、文に分ける。そしてそれぞれの文に対して他の言語で訳を作る。
+それぞれの言語での訳文に対しnlpでtokenizeする。
+文ごとのエントリーにそれぞれの言語でのnew_wordsのリストと、訳文を登録する。
+
+あと、もし新しいワードリストがすべての言語で空だったら、その文はどうする？No new words for sentence とする
+入力したうち、データと同じ文があれば、それは登録しない。
+"""
+
+
+def process_text(input_text, target_langs=target_languages.keys()):
+    print(f"{"="*150}\n⏳ Processing your input text!")
+    # detect the used language
+    detected_lang = translator.detect(input_text).lang
+    print(
+        f"🔍 Detected language: {target_languages[detected_lang]}")
+    nlp_dl = spacy.load(MODELS[detected_lang])
+    if not nlp_dl:
+        print(
+            f"No spaCy model for language: {detected_lang}\nFailed to process your text")
+        return
+
+    data = load_data()
+    id_start = len(data) or 0
+    print("⏳ Generating translations and new word lists")
+    doc_dl = nlp_dl(input_text)
+    for id, sent in enumerate(doc_dl.sents, id_start):
+        if any([True for v in data.values() if v["source_sentence"][detected_lang] == sent.text]):
+            print(f"🟡 '{sent}' already exists. Registration skipped.")
+            continue
+        print(f"🟢 Registering '{sent.text}'")
+        new_entry = copy.deepcopy(data_structure)
+        for lang in target_langs:
+            if detected_lang == lang:
+                new_entry["new_words"][lang] = get_word_list(
+                    sent, lang, data)
+                new_entry["sent_translations"][lang] = sent.text
+                new_entry["source_sentence"][lang] = sent.text
+            else:
+                translated_text = translator.translate(
+                    sent.text, src=detected_lang, dest=lang).text
+                nlp = spacy.load(MODELS[lang])
+                doc = nlp(translated_text)
+                new_entry["new_words"][lang] = get_word_list(
+                    doc, lang, data)
+                new_entry["sent_translations"][lang] = translated_text
+        new_entry["created_at"] = datetime.now(
+        ).isoformat(timespec='seconds')
+        data[id] = new_entry
+
+    if len(data) > id_start:  # if there are new items, save
+        print(f"⏳ Saving data to [{JSON_PATH}]")
+        save_data(data=data)  # save JSON data
+        print(f"⏳ Exporting data to [{EXCEL_PATH}]")
+        export_table()  # export JSON to excel file
+        print("✅ Registration completed!")
+    else:  # if there are no new items, skip saving
+        print("☑️  No new sentence was found. Registration skipped.")
+    print(f"{"="*150}")
+
+
+process_text(input_string)
